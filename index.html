@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>時光檔案館：抗戰風雲 (修復版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
+
+/* --- 全局設定 --- */
+	        body {
+	            margin: 0; padding: 0;
+	            overflow: hidden;
+	            background-color: #0c0a09;
+	            font-family: 'Noto Serif TC', 'Noto Color Emoji', sans-serif;
+	            touch-action: none; user-select: none;
+	        }
+	        /* 修正 iOS 兼容性：確保視口高度正確 */
+	        @supports (-webkit-touch-callout: none) {
+	            #viewport {
+	                height: -webkit-fill-available;
+	            }
+	        }
+
+        #viewport {
+            position: relative; width: 100vw; height: 100vh;
+            background: #111; overflow: hidden;
+        }
+
+        /* --- 遊戲世界 --- */
+        #world {
+            position: absolute; top: 0; left: 0;
+            height: 100%;
+            transition: transform 0.1s linear;
+        }
+
+        .layer-wall {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 30%;
+            z-index: 0; background-size: 80px 80px;
+        }
+        .layer-floor {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 30%;
+            z-index: 1; transform-origin: bottom;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
+        }
+
+        /* 材質 */
+        .floor-wood { background: repeating-linear-gradient(90deg, #2d1b15 0, #2d1b15 20px, #3e2723 20px, #3e2723 40px); border-top: 4px solid #1a100c; }
+        .floor-ruin { background-color: #1c1917; background-image: radial-gradient(#292524 20%, transparent 20%); background-size: 30px 30px; border-top: 4px solid #000; }
+        .floor-cave { background-color: #262626; border-top: 4px solid #171717; }
+        .floor-red { background-color: #450a0a; background-image: repeating-linear-gradient(45deg, #7f1d1d 0, #7f1d1d 10px, #450a0a 10px, #450a0a 20px); border-top: 4px solid #280505; }
+        
+        .wall-office { background-color: #292524; background-image: linear-gradient(#333 1px, transparent 1px); background-size: 100% 40px; }
+        .wall-ruin { background-color: #2a0a0a; }
+        .wall-cave { background-color: #1f1f22; }
+
+        /* --- 角色與物品 (關鍵修復部分) --- */
+        .sprite {
+            position: absolute;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+            transform: translate(-50%, -100%);
+            z-index: 10;
+            width: 100px; height: 120px; /* 統一容器大小 */
+            pointer-events: none; /* 讓點擊穿透到子元素或由 JS 判斷距離 */
+        }
+
+        /* 物品模型：圖片與 Emoji 共用的基礎樣式 */
+        .item-model {
+            width: 90px; height: 90px;
+            display: flex; align-items: center; justify-content: center;
+            filter: drop-shadow(0 4px 4px rgba(0,0,0,0.6));
+            transition: all 0.3s;
+            cursor: pointer;
+            pointer-events: auto; /* 恢復互動點擊 */
+            z-index: 15;
+        }
+
+        /* 圖片專用樣式 */
+        img.item-model {
+            object-fit: contain;
+            /* 移除 font-size，避免影響圖片 */
+        }
+
+        /* Emoji 專用樣式 (回退用) */
+        div.item-model.emoji-mode {
+            font-size: 75px;
+            line-height: 1;
+        }
+
+        .player-model {
+            font-size: 90px;
+            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.8));
+            z-index: 20;
+            line-height: 90px;
+        }
+        
+        .decor-model {
+            font-size: 75px; filter: brightness(0.5) blur(0.5px); opacity: 0.8; pointer-events: none; z-index: 5;
+            line-height: 90px;
+        }
+
+        /* 互動提示氣泡 (光圈) - 修復選擇器 */
+        .sprite.active .item-model {
+            filter: drop-shadow(0 0 20px #fbbf24) brightness(1.3);
+            transform: scale(1.15) translateY(-10px);
+        }
+
+        /* 掉落動畫 */
+        .drop-anim .item-model { animation: dropBounce 0.6s ease-out; }
+        @keyframes dropBounce {
+            0% { transform: translateY(-100px) scale(0.5); opacity: 0; }
+            60% { transform: translateY(0) scale(1.2); opacity: 1; }
+            100% { transform: translateY(0) scale(1); }
+        }
+
+        /* 出口發光 */
+        .exit-glow .item-model { animation: pulse-green 1.5s infinite; filter: drop-shadow(0 0 30px #22c55e); }
+        @keyframes pulse-green { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        /* --- UI 介面 --- */
+        .ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 50; display: none; }
+        .pointer-auto { pointer-events: auto; }
+
+        /* 修正十字鍵佈局 */
+        .dpad-area { 
+            position: absolute; bottom: 20px; left: 20px; 
+            width: 180px; height: 180px; /* 增加區域大小 */
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 5px; /* 按鈕間距 */
+        }
+        .dpad-btn {
+            width: 100%; height: 100%;
+            background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 12px; display: flex; align-items: center; justify-content: center;
+            color: white; touch-action: manipulation;
+            position: relative; /* 確保在 grid 佈局中能正常顯示 */
+        }
+        .dpad-btn:active { background: rgba(251, 191, 36, 0.6); border-color: #fbbf24; }
+        /* 使用 grid-area 重新定位按鈕 */
+        .btn-u { grid-area: 1 / 2 / 2 / 3; } /* 上：第1行，第2列 */
+        .btn-d { grid-area: 3 / 2 / 4 / 3; } /* 下：第3行，第2列 */
+        .btn-l { grid-area: 2 / 1 / 3 / 2; } /* 左：第2行，第1列 */
+        .btn-r { grid-area: 2 / 3 / 3 / 4; } /* 右：第2行，第3列 */
+        /* 隱藏中間的按鈕區域，避免誤觸 */
+        .btn-center { display: none; }
+
+        #action-btn {
+            position: absolute; bottom: 40px; right: 40px;
+            width: 100px; height: 100px;
+            background: rgba(0,0,0,0.5); border: 4px solid #57534e;
+            border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: #a8a29e; font-weight: bold; transition: all 0.2s; backdrop-filter: blur(4px);
+        }
+        #action-btn.active { 
+            background: rgba(251, 191, 36, 0.9); border-color: #fff;
+            color: black; transform: scale(1.1); box-shadow: 0 0 30px #fbbf24; 
+        }
+
+        .top-hud {
+            position: absolute; top: 0; left: 0; width: 100%; padding: 15px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+            display: flex; justify-content: space-between; color: white;
+        }
+
+        /* 模態框 */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+        }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+        
+        .modal-box {
+            background: #f5f5f4; width: 90%; max-width: 500px;
+            border-radius: 12px; overflow: hidden; border: 4px solid #444; color: #222;
+            box-shadow: 0 10px 50px rgba(0,0,0,1);
+        }
+
+        /* 筆記本 */
+        #notebook {
+            position: fixed; top: 0; right: 0; bottom: 0; width: 350px;
+            background: #fefce8; transform: translateX(100%);
+            transition: transform 0.3s; z-index: 150; border-left: 5px solid #333;
+            display: flex; flex-direction: column;
+        }
+        #notebook.open { transform: translateX(0); }
+
+        #toast {
+            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9); color: #fbbf24;
+            padding: 10px 20px; border-radius: 30px; border: 2px solid #fbbf24;
+            font-weight: bold; z-index: 200; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; font-size: 18px;
+        }
+
+        .name-tag {
+            background: rgba(0,0,0,0.7); color: white; padding: 2px 6px;
+            border-radius: 4px; font-size: 12px; margin-top: 5px; font-weight: bold; white-space: nowrap;
+        }
+
+        #ending-screen {
+            position: fixed; inset: 0; background: #1c1917; z-index: 200;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            color: #d6d3d1; text-align: center; padding: 2rem; overflow-y: auto;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <div id="viewport">
+        <div id="world">
+            <div id="layer-wall" class="layer-wall bg-stone-800"></div>
+            <div id="layer-floor" class="layer-floor floor-wood"></div>
+            <div id="layer-decor"></div>
+            <div id="layer-main">
+                <div id="player" class="sprite" style="left: 100px; top: 85%;">
+                    <img src="player.webp" class="player-model" alt="Player" onload="this.style.display='block'; this.nextElementSibling.style.display='none';" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" style="display:none; width:90px; height:90px; object-fit:contain;">
+                    <div class="player-model emoji-fallback">🕵️‍♂️</div>
+                    <div class="name-tag bg-blue-600">你</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="ui-layer" id="ui-layer">
+        <div class="top-hud">
+            <div>
+                <div class="text-[10px] text-stone-400 uppercase tracking-widest">Year</div>
+                <div id="hud-year" class="text-3xl font-bold text-amber-500 font-mono drop-shadow-md">1931</div>
+                <div id="hud-title" class="text-sm text-stone-300">瀋陽事變</div>
+            </div>
+            
+            <div class="flex flex-col items-end">
+                <div class="text-[10px] text-stone-400 uppercase tracking-widest">Inventory</div>
+                <div id="hud-inventory" class="flex gap-2 mt-1 min-h-[30px]">
+                    <span class="text-xs text-stone-600 italic mt-1">背包是空的</span>
+                </div>
+            </div>
+        </div>
+
+        <button onclick="toggleNotebook()" class="pointer-auto absolute top-20 right-6 bg-stone-800 p-3 rounded-full border-2 border-stone-600 shadow-xl hover:scale-110 transition">
+            <i data-lucide="book-open" class="text-amber-500 w-6 h-6"></i>
+            <span id="note-dot" class="absolute top-0 right-0 w-3 h-3 bg-red-600 rounded-full hidden"></span>
+        </button>
+
+<div class="dpad-area pointer-auto">
+	            <div class="dpad-btn btn-u"><i data-lucide="chevron-up" class="w-8 h-8"></i></div>
+	            <div class="dpad-btn btn-l"><i data-lucide="chevron-left" class="w-8 h-8"></i></div>
+	            <div class="dpad-btn btn-center"></div> <!-- 佔位符，確保十字鍵佈局正確 -->
+	            <div class="dpad-btn btn-r"><i data-lucide="chevron-right" class="w-8 h-8"></i></div>
+	            <div class="dpad-btn btn-d"><i data-lucide="chevron-down" class="w-8 h-8"></i></div>
+	        </div>
+
+        <div id="action-btn" class="pointer-auto" onclick="triggerInteract()">
+            <i data-lucide="hand" class="w-10 h-10 mb-1"></i>
+            <span class="text-sm">調查</span>
+        </div>
+
+        <div class="absolute bottom-4 w-full text-center text-white/30 text-xs hidden md:block">
+            WASD 移動 | 空白鍵 / Enter 互動
+        </div>
+    </div>
+
+    <div id="modal" class="modal-overlay">
+        <div class="modal-box">
+            <div class="bg-stone-800 p-5 text-white flex items-center gap-4 border-b-4 border-amber-600">
+                <div id="m-icon-box" class="w-20 h-20 bg-stone-700 rounded flex items-center justify-center overflow-hidden text-6xl">
+                    </div>
+                <h2 id="m-title" class="text-2xl font-bold">標題</h2>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[60vh]">
+                <p id="m-desc" class="text-xl text-stone-800 leading-relaxed font-medium mb-4">...</p>
+                <div id="m-dse" class="bg-amber-100 border-l-4 border-amber-600 p-3 mb-4 rounded text-sm text-amber-900 hidden">
+                    <strong>📝 歷史重點：</strong><span id="m-dse-text"></span>
+                </div>
+                <div id="m-opts" class="flex flex-col gap-2"></div>
+            </div>
+            <div class="bg-stone-200 p-3 text-right">
+                <button onclick="closeModal()" class="px-6 py-3 bg-stone-700 text-white rounded font-bold hover:bg-stone-600 text-lg">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notebook" class="pointer-auto shadow-2xl">
+        <div class="bg-stone-800 p-4 text-white flex justify-between items-center">
+            <span class="font-bold flex gap-2 items-center text-lg"><i data-lucide="book"></i> 調查筆記</span>
+            <button onclick="toggleNotebook()"><i data-lucide="x"></i></button>
+        </div>
+        <div id="nb-content" class="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fefce8]">
+            <div class="text-center text-gray-400 mt-10">暫無記錄</div>
+        </div>
+    </div>
+
+    <div id="toast">獲得物品！</div>
+
+    <div id="intro-screen" class="modal-overlay show" style="background: #000; z-index: 200;">
+        <div class="max-w-2xl w-full bg-stone-900 border-2 border-stone-700 rounded-lg shadow-2xl m-4 p-8 overflow-y-auto max-h-screen">
+            <div class="bg-amber-900 p-6 border-b-4 border-amber-700 -mx-8 -mt-8 mb-6">
+                <h1 class="text-3xl font-bold text-white flex items-center gap-3">
+                    <i data-lucide="file-text"></i> 機密檔案：<span id="intro-year" class="font-mono">1931</span>
+                </h1>
+                <p id="intro-title" class="text-amber-200 text-lg mt-1">...</p>
+            </div>
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-amber-500 font-bold text-sm uppercase tracking-widest mb-2">歷史背景 BACKGROUND</h3>
+                    <p id="intro-hist" class="text-stone-300 leading-relaxed text-lg">...</p>
+                </div>
+                <div class="bg-black/40 p-4 rounded border-l-4 border-green-500 mb-8">
+                    <h3 class="text-green-400 text-xs font-bold uppercase mb-1">當前任務 MISSION</h3>
+                    <p id="intro-obj" class="text-white font-bold text-lg">...</p>
+                </div>
+                <div class="flex justify-center">
+                     <button onclick="startGame()" class="px-12 py-4 bg-amber-700 hover:bg-amber-600 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105 active:scale-95">
+                        接受任務
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="ending-screen">
+        <div class="max-w-3xl w-full p-8 bg-stone-900 rounded-lg border-2 border-amber-600 shadow-2xl">
+            <h1 class="text-5xl text-amber-500 font-bold mb-8 font-serif border-b border-amber-800 pb-4">抗戰勝利與影響</h1>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                <div class="bg-stone-800 p-6 rounded border-t-4 border-blue-500">
+                    <h2 class="text-xl text-white font-bold mb-2">🌏 國際地位</h2>
+                    <p class="text-stone-400 text-sm leading-relaxed">戰後，中國國際地位提升，成為<strong>聯合國創始會員國</strong>，並擔任安理會五大常任理事國之一。</p>
+                </div>
+                <div class="bg-stone-800 p-6 rounded border-t-4 border-red-500">
+                    <h2 class="text-xl text-white font-bold mb-2">📜 廢除條約</h2>
+                    <p class="text-stone-400 text-sm leading-relaxed">各國廢除以往簽訂之不平等條約，收回租界與治外法權。</p>
+                </div>
+                <div class="bg-stone-800 p-6 rounded border-t-4 border-green-500">
+                    <h2 class="text-xl text-white font-bold mb-2">🗺️ 收復失地</h2>
+                    <p class="text-stone-400 text-sm leading-relaxed">日本歸還東北三省，<strong>台灣及澎湖列島</strong>重回中國版圖。</p>
+                </div>
+            </div>
+            <div class="mt-12 text-center">
+                <button onclick="location.reload()" class="px-10 py-4 bg-amber-700 hover:bg-amber-600 text-white font-bold rounded-full">重新開始歷史旅程</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 參數 ---
+        const WORLD_WIDTH = 2800; 
+        const SPEED = 4;
+        const INTERACT_DIST_X = 350; // 微調距離
+        const INTERACT_DIST_Y = 250;
+        const FLOOR_Y_MIN = 60;
+        const FLOOR_Y_MAX = 95;
+
+        let player = { x: 100, y: 80, el: null };
+        let keys = { u:false, d:false, l:false, r:false };
+        let gameState = { level: 0, inventory: [], unlocked: [], notes: [], interactions: {} };
+        let isPaused = true;
+        let activeItem = null;
+
+        // --- 2. 關卡數據 (已確認所有 ID 與關係鏈接無誤) ---
+        const LEVELS = [
+            {
+                id: 0, year: "1931", title: "瀋陽事變",
+                history: "1931年9月18日，日軍自行炸毀南滿鐵路柳條湖段，反誣中國軍隊所為，炮轟北大營。這便是震驚中外的「九一八事變」。",
+                objective: "尋找上級指示，並安全撤離辦公室。",
+                floor: "floor-wood", wall: "wall-office",
+                decor: [
+                    {x: 200, y: 40, e:"🪟"}, {x: 600, y: 45, e:"🕰️"}, {x: 1000, y: 50, e:"🪴"}, 
+                    {x: 1400, y: 40, e:"🖼️"}, {x: 1800, y: 55, e:"🪑"}, {x: 50, y: 60, e:"🗄️"}
+                ],
+                items: [
+                    { id: "rifle", x: 250, y: 70, img: "rifle.webp", emoji: "🔫", name: "步槍", type: "read", desc: "一把被丟棄的步槍。日軍炸毀鐵路並聲稱找到中國軍備的槍枝，以此為藉口發動攻擊。", dse: "日軍製造柳條湖事件，栽贓嫁禍。" },
+                    { id: "book", x: 300, y: 50, img: "bookshelf.webp", emoji: "📚", name: "書架", type: "read", desc: "書架上有一本《田中奏摺》。上面寫著：『欲征服中國，必先征服滿蒙』。", dse: "日本大陸政策的擴張藍圖。" },
+                    { id: "news", x: 500, y: 75, img: "newspaper_1931.webp", emoji: "📰", name: "報紙", type: "read", desc: "《盛京時報》頭條：『日軍誣指中國軍隊炸毀柳條湖鐵路』。這是日軍侵略的藉口。", dse: "九一八事變導火線：柳條湖事件。" },
+                    { id: "phone", x: 700, y: 72, img: "phone.webp", emoji: "☎️", name: "電話", type: "read", desc: "日軍正攻打瀋陽，電話線斷了，通訊中斷。", dse: null },
+                    { id: "tea", x: 900, y: 60, img: "teapot.webp", emoji: "🫖", name: "茶壺", type: "read", desc: "茶還是熱的。部隊正在圍攻共產黨，離開得非常倉促。", dse: null },
+                    { id: "map", x: 1100, y: 50, img: "map_northeast.webp", emoji: "🗺️", name: "地圖", type: "read", desc: "地圖上標示著南滿鐵路。日軍早已在此駐紮大量兵力。", dse: "日本大陸政策：欲征服中國，必先征服滿蒙。" },
+                    
+                    { id: "calendar", x: 2000, y: 45, img: "calendar_918.webp", emoji: "📅", name: "日曆", type: "read", desc: "日曆停留在：9月18日。這一天將被歷史銘記。", isKey: true }, 
+                    { id: "safe", x: 1600, y: 70, img: "safe.webp", emoji: "🔐", name: "保險箱", type: "lock", code: "0918", hint: "我不知道密碼... (請尋找線索)", unlock: "telegram", desc: "保險箱已開啟。" },
+                    { id: "telegram", x: 1750, y: 80, img: "telegram.webp", emoji: "📜", name: "密電", hidden: true, type: "take", desc: "密電內容：『為免事態擴大，絕對不許抵抗，聽候國聯調停。』", dse: "國民政府採「不抵抗政策」，寄望國聯調停。", isKey: true },
+                    
+                    { id: "door", x: 2400, y: 65, img: "door_office.webp", emoji: "🚪", name: "大門", type: "exit", req: "telegram", msg: "未拿到指令！(請檢查保險箱)", quiz:{q:"面對日軍進攻，上級的命令是？", opts:["抵抗", "不抵抗", "談判"], ans:1}, success: "你咬著牙執行了命令，帶著遺憾撤離了瀋陽。" }
+                ]
+            },
+            {
+                id: 1, year: "1936", title: "西安事變",
+                history: "1936年，面對日軍步步進逼，蔣介石仍堅持「攘外必先安內」的政策。張學良和楊虎城在西安發動「兵諫」，扣押蔣介石，要求停止內戰，一致抗日。",
+                objective: "尋找關鍵文件，說服衛兵放行。",
+                floor: "floor-wood", wall: "wall-office",
+                decor: [{x: 300, y: 40, e:"🏺"}, {x: 700, y: 40, e:"🏮"}, {x: 1200, y: 50, e:"🛋️"}, {x: 1600, y: 40, e:"🖼️"}],
+                items: [
+                    { id: "shoes", x: 400, y: 80, img: "slippers.webp", emoji: "👞", name: "拖鞋", type: "read", desc: "地上有一隻拖鞋。委員長逃跑時連鞋都沒穿好。", dse: "蔣介石倉皇出逃。" },
+                    { id: "bed", x: 500, y: 70, img: "bed_messy.webp", emoji: "🛏️", name: "床鋪", type: "read", desc: "床鋪凌亂，蔣委員曾被囚禁於此處—西安市的張學良公館。", dse: null },
+                    { id: "teeth", x: 600, y: 65, img: "glass_teeth.webp", emoji: "🥛", name: "玻璃杯", type: "read", desc: "杯子裡泡著假牙。這是蔣介石的貼身物品。", dse: null },
+                    
+                    { id: "poster", x: 1800, y: 50, img: "poster_songhua.webp", emoji: "📜", name: "樂譜", type: "read", desc: "「我的家在東北松花江上...九一八、九一八，在那個悲慘的時候...」日軍侵擾不斷。", dse: "兵諫訴求。" },
+                    { id: "radio_xian", x: 1100, y: 60, img: "radio_old.webp", emoji: "📻", name: "收音機", type: "read", desc: "播放著全國各界呼籲和平解決兩黨衝突、團結抗日的呼聲。", dse: "輿論呼籲。" },
+                    { id: "news_extra", x: 1300, y: 50, img: "newspaper_xian.webp", emoji: "📰", name: "號外", type: "read", desc: "號外：張學良、楊虎城發動兵諫，扣押蔣介石！", dse: "西安事變爆發。" },
+
+                    { id: "window", x: 900, y: 50, img: "window_snow.webp", emoji: "🪟", name: "窗戶", type: "multi_search", steps: ["窗戶大開。", "窗台縫隙有東西...", "找到一把鑰匙！"], unlock: "key", desc: "窗台空了。" },
+                    { id: "key", x: 950, y: 80, img: "key.webp", emoji: "🔑", name: "鑰匙", hidden: true, type: "take", desc: "一把黃銅鑰匙。", isTool: true },
+                    { id: "drawer", x: 1400, y: 75, img: "drawer.webp", emoji: "🗄️", name: "抽屜", type: "key_lock", req: "key", msg: "鎖住了。(鑰匙會在哪裡？)", unlock: "doc", desc: "抽屜打開了。" },
+                    
+                    { id: "doc", x: 1550, y: 80, img: "doc_ccp.webp", emoji: "📄", name: "文件", hidden: true, type: "take", desc: "中共尋求合作，提出『停止內戰，一致抗日』。", dse: "西安事變促成第二次國共合作。", isKey: true },
+                    
+                    { id: "guard", x: 2200, y: 75, img: "guard.webp", emoji: "👮", name: "衛兵", type: "exit", req: "doc", msg: "衛兵：『口令！』(去找文件)", quiz:{q:"兵諫目的是？", opts:["殺蔣", "停止內戰，一致抗日"], ans:1}, success: "衛兵敬禮放行。" }
+                ]
+            },
+            {
+                id: 2, year: "1937", title: "全面抗戰",
+                history: "1937年7月7日，盧溝橋事變爆發，標誌著全面抗戰的開始。隨後淞滬會戰爆發，雖然打破了日軍「三個月亡華」的迷夢，但上海、南京相繼淪陷。國民政府決定遷都。",
+                objective: "搜集物資修好卡車，撤往大後方。",
+                floor: "floor-ruin", wall: "wall-ruin",
+                decor: [{x: 200, y: 60, e:"🔥"}, {x: 600, y: 70, e:"🧱"}, {x: 1500, y: 60, e:"🔥"}, {x: 1000, y: 50, e:"🏚️"}],
+                items: [
+                    { id: "bridge", x: 200, y: 50, img: "lion.webp", emoji: "🦁", name: "石獅子", type: "read", desc: "盧溝橋石獅。1937年7月7日，日軍藉口士兵失蹤發動進攻。", dse: "七七事變：全面抗戰起點。" },
+                    { id: "rubble", x: 400, y: 80, img: "rubble.webp", emoji: "🧱", name: "廢墟", type: "multi_search", steps: ["日軍入侵，實行三光政策，四處成了廢墟。", "殺光、燒光、搶光...", "瓦礫下發現一個輪胎！"], unlock: "tire", desc: "瓦礫堆。" },
+                    { id: "tire", x: 450, y: 85, img: "tire.webp", emoji: "🛞", name: "輪胎", hidden: true, type: "take", desc: "卡車備用輪胎。", isKey: true },
+                    { id: "motorcycle", x: 900, y: 70, img: "bicycle.webp", emoji: "🏍️", name: "電單車", type: "multi_search", steps: ["一輛日軍電單車。", "檢查油箱...", "抽到了一罐汽油！"], unlock: "gas", desc: "油箱空了。" },
+                    { id: "gas", x: 950, y: 75, img: "gasoline.webp", emoji: "⛽", name: "汽油", hidden: true, type: "take", desc: "一罐珍貴的汽油。", isKey: true },
+                    { id: "paper", x: 1200, y: 80, img: "newspaper_1937.webp", emoji: "📰", name: "撒退手令", type: "take", desc: "手令：為使敵人重型武器失效，要往重慶大後方撤退，後方速速跟上。", dse: "退守後方，作持久戰。", isKey: true },
+                    { id: "bag", x: 1400, y: 80, img: "bag.webp", emoji: "🎒", name: "包袱", type: "read", desc: "難民遺落的包袱。", dse: null },
+                    { id: "radio", x: 1600, y: 70, img: "radio.webp", emoji: "📻", name: "廣播", type: "read", desc: "廣播：『地無分南北，年無分老幼...』", dse: "蔣介石廬山聲明。" },
+                    { id: "poster", x: 1800, y: 50, img: "slogan.webp", emoji: "📜", name: "標語", type: "read", desc: "牆上刷著標語：『一寸山河一寸血』。", dse: "全民抗戰的決心。" },
+                    
+                    { id: "money_mil", x: 1900, y: 75, img: "money_military.webp", emoji: "💴", name: "軍票", type: "read", desc: "日軍發行的軍票。強制中國百姓使用，掠奪財富。", dse: "日本在淪陷區的經濟掠奪。" },
+                    { id: "safe_zone", x: 1700, y: 40, img: "sign_safezone.webp", emoji: "⭕", name: "標誌", type: "read", desc: "國際安全區標誌。", dse: "南京大屠殺期間的國際援助，成立安全區保護中國人。" },
+                    { id: "flag_puppet", x: 2100, y: 50, img: "flag_wang.webp", emoji: "🏳️", name: "旗幟", type: "read", desc: "偽國民政府的旗幟。", dse: "日本拉攏汪精衛，實行「以華制華」的策略。" },
+                    
+                    { id: "truck", x: 2400, y: 75, img: "truck.webp", emoji: "🚚", name: "卡車", type: "exit", req: ["paper", "tire", "gas"], msg: "卡車壞了！(需要輪胎、汽油、撤退手令)", quiz:{q:"卡車可以啟動了，我們目的地是哪裡？", opts:["上海", "重慶"], ans:1}, success: "撤往重慶。" }
+                ]
+            },
+            {
+                id: 3, year: "1940", title: "重慶・持久戰",
+                history: "1940年，戰時陪都重慶。日軍進行長期無差別轟炸。中國軍民在物資極度匱乏的情況下堅持抗戰，以空間換取時間。",
+                objective: "修理通風系統，破譯密碼。",
+                floor: "floor-cave", wall: "wall-cave",
+                decor: [{x: 200, y: 50, e:"📦"}, {x: 600, y: 40, e:"🕯️"}],
+                items: [
+                    { id: "fabi", x: 800, y: 75, img: "money_fabi.webp", emoji: "💵", name: "法幣", type: "read", desc: "一捆法幣只能買一袋米。", dse: "戰時物資短缺，通貨膨脹嚴重。" },
+                    { id: "box", x: 2000, y: 70, img: "supplies_box.webp", emoji: "📦", name: "物資箱", type: "box", content: "wrench", desc: "打開了箱子。" },
+                    { id: "wrench", x: 2050, y: 80, img: "wrench.webp", emoji: "🔧", name: "板手", hidden: true, type: "take", desc: "一把板手。", isTool: true },
+                    { id: "fan", x: 1500, y: 50, img: "fan_ventilator.webp", emoji: "☢️", name: "通風扇", type: "fan_repair", req: "wrench", msg: "風扇卡住了。", unlock: "codebook", desc: "風扇轉動了。" },
+                    { id: "codebook", x: 1550, y: 70, img: "book_code.webp", emoji: "📘", name: "密碼本", hidden: true, type: "take", desc: "掉出的密碼本。", isKey: true },
+                    
+                    { id: "manual_tunnel", x: 600, y: 65, img: "book_manual.webp", emoji: "📓", name: "手冊", type: "read", desc: "《地道戰手冊》。", dse: "地道下有複雜的網絡，結合防火、防水、防毒功能，並設有射擊孔，翻板陷阱偷襲敵人。" },
+                    { id: "map_burma", x: 1000, y: 50, img: "map_burma.webp", emoji: "🗺️", name: "地圖", type: "read", desc: "滇緬公路地圖。", dse: "人手開鑿從雲南至緬甸的公路，是運送物資的重要通道。" },
+                    { id: "headband", x: 1200, y: 75, img: "headband.webp", emoji: "🧣", name: "頭巾", type: "read", desc: "游擊隊的頭巾。", dse: "敵進我退，敵退我進，中共擅長於敵後方進行游擊戰作擾亂。" },
+                    { id: "badge", x: 1800, y: 65, img: "badge_tiger.webp", emoji: "🎖️", name: "徽章", type: "read", desc: "飛虎隊徽章。", dse: "盟軍的空軍援助。" },
+                    
+                    { id: "map", x: 2400, y: 60, img: "map_strategy.webp", emoji: "📠", name: "電報機", type: "exit", req: "codebook", msg: "無法破譯。(請找密碼本)", quiz:{q:"戰略方針是？", opts:["速戰速決", "持久戰"], ans:1}, success: "正確！" }
+                ]
+            },
+            {
+                id: 4, year: "1945", title: "抗戰勝利",
+                history: "1945年8月15日，日本宣佈無條件投降。",
+                objective: "準備受降儀式所需物品。",
+                floor: "floor-red", wall: "wall-office",
+                decor: [{x: 300, y: 40, e:"🏮"}, {x: 700, y: 40, e:"🎊"}],
+                items: [
+                    { id: "radio_vic", x: 1300, y: 70, img: "radio.webp", emoji: "📻", name: "收音機", type: "read", desc: "廣播：『八月十五日，日本宣布無條件投降。』", dse: null },
+                    
+                    { id: "atom_news", x: 1100, y: 50, img: "newspaper_atom.webp", emoji: "🗞️", name: "報紙", type: "read", desc: "美軍投下原子彈。", dse: "兩枚原子彈「胖子」和「小男孩」加速日本投降。" },
+                    { id: "leaflet_soviet", x: 900, y: 75, img: "leaflet_soviet.webp", emoji: "📄", name: "傳單", type: "read", desc: "蘇聯紅軍出兵東北。", dse: "蘇聯參戰，並助共產黨取得大量日軍精良裝備。" },
+                    { id: "photo_pearl", x: 700, y: 60, img: "photo_pearl.webp", emoji: "🖼️", name: "照片", type: "read", desc: "日軍偷襲珍珠港。", dse: "日本於1941年12月7日偷襲美國於夏威夷的海軍基地，促成美國參戰。" },
+
+                    { id: "safe_pen", x: 1700, y: 70, img: "safe.webp", emoji: "🔐", name: "保險盒", type: "lock", code: "0815", hint: "密碼是勝利日期 (MMDD)。(聽聽廣播？)", unlock: "pen", desc: "盒子打開了。" },
+                    { id: "pen", x: 1750, y: 80, img: "pen.webp", emoji: "✒️", name: "簽字筆", hidden: true, type: "take", desc: "派克金筆。", isKey: true },
+                    { id: "coat", x: 500, y: 60, img: "coat_military.webp", emoji: "🧥", name: "外套", type: "multi_search", steps: ["一件軍人外套。", "這外套有點帥氣...", "口袋好像有東西：是鑰匙！"], unlock: "key", desc: "空了。" },
+                    { id: "key", x: 550, y: 70, img: "key_brass.webp", emoji: "🗝️", name: "鑰匙", hidden: true, type: "take", desc: "銅鑰匙。", isTool: true },
+                    { id: "cabinet", x: 800, y: 60, img: "cabinet_wood.webp", emoji: "🗄️", name: "櫃子", type: "key_lock", req: "key", msg: "鎖住了。", unlock: "seal", desc: "櫃子打開了。" },
+                    { id: "seal", x: 850, y: 70, img: "seal_national.webp", emoji: "🏮", name: "國璽", hidden: true, type: "take", desc: "國璽。", isKey: true },
+                    { id: "table", x: 2300, y: 70, img: "surrender_table.webp", emoji: "🕊️", name: "受降臺", type: "exit", req: ["seal", "pen"], msg: "儀式未準備好！", quiz:{q:"抗日戰爭的勝利原因是？", opts:["原子彈", "全民族抗戰"], ans:1}, success: "中華民族萬歲！" }
+                ]
+            }
+        ];
+
+        // --- 3. 核心邏輯 ---
+        function initLevel() {
+            const level = LEVELS[gameState.level];
+            gameState.interactions = {};
+            
+            document.getElementById('hud-year').innerText = level.year;
+            document.getElementById('hud-title').innerText = level.title;
+            document.getElementById('intro-year').innerText = level.year;
+            document.getElementById('intro-title').innerText = level.title;
+            document.getElementById('intro-hist').innerText = level.history;
+            document.getElementById('intro-obj').innerText = level.objective;
+            
+            document.getElementById('intro-screen').classList.add('show');
+            document.getElementById('ui-layer').style.display = 'none';
+            document.getElementById('viewport').style.opacity = 0; 
+            isPaused = true;
+
+            document.getElementById('world').style.width = WORLD_WIDTH + 'px';
+            document.getElementById('layer-floor').className = `layer-floor ${level.floor}`;
+            document.getElementById('layer-wall').className = `layer-wall ${level.wall}`;
+            
+            const decorLayer = document.getElementById('layer-decor');
+            decorLayer.innerHTML = '';
+            level.decor.forEach(d => {
+                const el = document.createElement('div');
+                el.className = 'sprite'; el.style.left = d.x+'px'; el.style.top = d.y+'%';
+                el.innerHTML = `<div class="decor-model">${d.img ? `<img src="${d.img}" class="w-full h-full object-contain">` : d.e}</div>`;
+                decorLayer.appendChild(el);
+            });
+
+            renderItems();
+
+            player.x = 100; player.y = 80;
+            updatePlayerPos();
+            updateInventoryUI();
+        }
+
+        // --- 重寫的 renderItems 函數：修復渲染與互動 ---
+        function renderItems() {
+            const mainLayer = document.getElementById('layer-main');
+            const oldItems = mainLayer.querySelectorAll('.item-sprite');
+            oldItems.forEach(e => e.remove());
+
+            LEVELS[gameState.level].items.forEach(item => {
+                // 如果是隱藏物品，且尚未解鎖，則不渲染
+                if (item.hidden && !gameState.unlocked.includes(item.id)) return;
+                // 如果物品已放入背包，則從場景中移除
+                if (gameState.inventory.includes(item.id)) return;
+
+                const el = document.createElement('div');
+                el.className = 'sprite item-sprite';
+                el.style.left = item.x + 'px';
+                el.style.top = item.y + '%';
+                el.dataset.id = item.id;
+                
+                // 構建內部 HTML：同時包含 Image 和 Emoji
+                // 重要：確保兩個元素都有 item-model 類別，這樣 CSS 才能正確套用大小和互動
+                // 使用 onerror 自動切換顯示
+                let innerHTML = '';
+                
+                if (item.img) {
+                    // 優先顯示圖片，失敗時隱藏自己並顯示下一個兄弟元素 (Emoji)
+                    innerHTML += `<img src="${item.img}" class="item-model" alt="${item.name}" 
+                        onload="this.style.display='flex'; this.nextElementSibling.style.display='none';" 
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                        style="display:none;">`; // 預設隱藏，等待 onload 觸發，避免閃爍
+                    // 後備 Emoji：預設顯示 (防止圖片加載慢時空白)，如果圖片載入成功會被隱藏
+                    innerHTML += `<div class="item-model emoji-mode" style="display:flex;">${item.emoji}</div>`;
+                } else {
+                    // 只有 Emoji 的情況
+                    innerHTML += `<div class="item-model emoji-mode">${item.emoji}</div>`;
+                }
+
+                // 檢查是否滿足出口條件以添加發光效果
+                let reqMet = false;
+                if (item.type === 'exit') {
+                    if (Array.isArray(item.req)) {
+                        reqMet = item.req.every(r => gameState.inventory.includes(r));
+                    } else {
+                        reqMet = gameState.inventory.includes(item.req);
+                    }
+                }
+                if (reqMet) el.classList.add('exit-glow');
+
+                el.innerHTML = innerHTML + `<div class="name-tag">${item.name}</div>`;
+                mainLayer.appendChild(el);
+            });
+        }
+
+// 修正：使用 requestAnimationFrame 的時間戳來計算 deltaTime
+	        let lastTime = 0;
+	        function gameLoop(timestamp) {
+	            if (!lastTime) lastTime = timestamp;
+	            const deltaTime = timestamp - lastTime;
+	            lastTime = timestamp;
+	
+	            if (!isPaused) {
+	                let dx = 0; let dy = 0;
+	                // 修正：使用 deltaTime 確保移動速度在不同幀率下保持一致
+	                // 16.67ms 約等於 60 FPS
+	                const moveSpeed = SPEED * (deltaTime / 16.67); 
+	
+	                if (keys.l) dx = -moveSpeed; if (keys.r) dx = moveSpeed;
+	                if (keys.u) dy = -moveSpeed/2; if (keys.d) dy = moveSpeed/2;
+	
+	                if (dx !== 0 || dy !== 0) {
+	                    player.x = Math.max(30, Math.min(WORLD_WIDTH-30, player.x + dx));
+	                    player.y = Math.max(FLOOR_Y_MIN, Math.min(FLOOR_Y_MAX, player.y + (dy*0.1)));
+	                    updatePlayerPos();
+	                    updateCamera();
+	                    checkProximity();
+	                }
+	            }
+	            requestAnimationFrame(gameLoop);
+	        }
+
+        function updatePlayerPos() {
+            if(player.el) {
+                player.el.style.left = player.x + 'px';
+                player.el.style.top = player.y + '%';
+                if (keys.l) player.el.style.transform = "translate(-50%, -100%) scaleX(-1)";
+                if (keys.r) player.el.style.transform = "translate(-50%, -100%) scaleX(1)";
+                player.el.style.zIndex = Math.floor(player.y * 10);
+            }
+        }
+
+        function updateCamera() {
+            let camX = Math.max(0, Math.min(WORLD_WIDTH - window.innerWidth, player.x - window.innerWidth/3));
+            document.getElementById('world').style.transform = `translateX(${-camX}px)`;
+        }
+
+        function checkProximity() {
+            let closest = null, minDist = INTERACT_DIST_X;
+            // 這裡的邏輯依賴 item.x/y，與 DOM 結構無關，只要 DOM 存在即可
+            document.querySelectorAll('.item-sprite').forEach(el => {
+                const item = LEVELS[gameState.level].items.find(i => i.id === el.dataset.id);
+                if (!item) return;
+                const dx = Math.abs(player.x - item.x);
+                const dy = Math.abs(player.y - item.y); // 加入 Y 軸檢測，避免誤觸
+                
+                if (dx < INTERACT_DIST_X && dy < INTERACT_DIST_Y) {
+                    if (dx < minDist) { minDist = dx; closest = {data:item, el:el}; }
+                }
+                el.classList.remove('active');
+            });
+
+            activeItem = closest ? closest.data : null;
+            if (closest) { 
+                closest.el.classList.add('active'); 
+                document.getElementById('action-btn').classList.add('active'); 
+            }
+            else {
+                document.getElementById('action-btn').classList.remove('active');
+            }
+        }
+
+        function triggerInteract() { if (activeItem && !isPaused) handleItem(activeItem); }
+
+        function handleItem(item) {
+            if (!gameState.interactions[item.id]) gameState.interactions[item.id] = 0;
+            gameState.interactions[item.id]++;
+            const count = gameState.interactions[item.id];
+
+            if (item.type === "multi_search") {
+                if (gameState.unlocked.includes(item.unlock)) { showDialog(item.name, item.desc, null, item); return; }
+                const idx = Math.min(count - 1, item.steps.length - 1);
+                showDialog(item.name, item.steps[idx], null, item);
+                if (count >= item.steps.length) setTimeout(() => unlockItem(item.unlock), 1000);
+            }
+            else if (item.type === "lock") {
+                if (gameState.unlocked.includes(item.id)) showDialog(item.name, item.desc, null, item);
+                else if ((item.id === "safe" && !gameState.interactions["calendar"]) ||
+                         (item.id === "safe_pen" && !gameState.interactions["radio_vic"])) {
+                     showDialog(item.name, item.hint || "我不知道密碼...", null, item);
+                }
+                else {
+                    showLock(item);
+                }
+            } 
+            else if (item.type === "key_lock") {
+                if (gameState.unlocked.includes(item.id)) showDialog(item.name, item.desc, item.dse, item);
+                else {
+                    if (gameState.inventory.includes(item.req)) { 
+                        unlockItem(item.id); 
+                        // 強制解鎖內容物
+                        const content = LEVELS[gameState.level].items.find(i => i.id === item.unlock);
+                        if(content) unlockItem(content.id);
+                        
+                        showDialog("成功", "使用了鑰匙，發現了重要物品！", null, item); 
+                    }
+                    else showDialog("上鎖", item.msg, null, item);
+                }
+            }
+            else if (item.type === "fan_repair") {
+                if (gameState.unlocked.includes(item.id)) showDialog(item.name, item.desc, null, item);
+                else if (gameState.inventory.includes(item.req)) {
+                    showDialog("修理", "修好了！是否啟動？", null, item, [{txt:"啟動", fn:()=>{
+                        closeModal(); unlockItem(item.id);
+                        setTimeout(()=>unlockItem(item.unlock), 500);
+                    }}]);
+                } else showDialog("故障", item.msg, null, item);
+            }
+            else if (item.type === "box") {
+                 showDialog(item.name, item.desc, null, item, [{txt:"打開", fn:()=>{
+                    closeModal(); unlockItem(item.content);
+                }}]);
+            }
+            else if (item.type === "exit") {
+                let reqMet = Array.isArray(item.req) ? item.req.every(r => gameState.inventory.includes(r)) : gameState.inventory.includes(item.req);
+                if (reqMet) showQuiz(item);
+                else showDialog("無法前進", item.msg, null, item);
+            }
+            else {
+                showDialog(item.name, item.desc, item.dse, item);
+                if (item.type === "take") pickupItem(item);
+                if (item.dse) saveNote(item.name, item.dse);
+            }
+        }
+
+        function unlockItem(id) {
+            if (!gameState.unlocked.includes(id)) {
+                gameState.unlocked.push(id);
+                renderItems();
+                // 動畫
+                const el = document.querySelector(`.sprite[data-id="${id}"] .item-model`);
+                if(el) el.classList.add('drop-anim');
+            }
+        }
+
+        function pickupItem(item) {
+            if (!gameState.inventory.includes(item.id)) {
+                gameState.inventory.push(item.id);
+                updateInventoryUI();
+                showToast(`獲得：${item.name}`);
+                renderItems();
+                if (item.dse) saveNote(item.name, item.dse);
+            }
+        }
+
+        function updateInventoryUI() {
+            const div = document.getElementById('hud-inventory');
+            if (!div) return;
+            if (gameState.inventory.length === 0) { div.innerHTML = '<span class="text-xs text-stone-600 italic">空</span>'; return; }
+            div.innerHTML = '';
+            gameState.inventory.forEach(id => {
+                let name = id;
+                let emoji = '';
+                // 修正：從整個 LEVELS 數組中查找物品信息
+                for (let l of LEVELS) {
+                    let f = l.items.find(i => i.id === id);
+                    if (f) { name = f.name; emoji = f.emoji; break; }
+                }
+                div.innerHTML += `<div class="bg-stone-800 text-lg w-8 h-8 flex items-center justify-center rounded border border-stone-600 shadow text-white" title="${name}">${emoji}</div>`;
+            });
+        }
+
+        function showDialog(title, desc, dse, itemData, opts) {
+            isPaused = true;
+            document.getElementById('modal').classList.add('show');
+            document.getElementById('m-title').innerText = title;
+            document.getElementById('m-desc').innerText = desc;
+            
+            // 彈窗圖示邏輯：優先使用圖片
+            let iconImg = `<div class="text-4xl">${itemData.emoji}</div>`;
+            if(itemData.img) {
+                // 使用 onerror 回退，確保彈窗也有圖
+                iconImg = `<img src="${itemData.img}" class="w-full h-full object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                           <div class="text-4xl hidden">${itemData.emoji}</div>`;
+            }
+            document.getElementById('m-icon-box').innerHTML = iconImg;
+            
+            const dseEl = document.getElementById('m-dse');
+            if (dse) { dseEl.classList.remove('hidden'); document.getElementById('m-dse-text').innerText = dse; } 
+            else dseEl.classList.add('hidden');
+            
+            const optDiv = document.getElementById('m-opts');
+            optDiv.innerHTML = '';
+            if (opts) {
+                opts.forEach(o => {
+                    const btn = document.createElement('button');
+                    btn.className = "w-full bg-amber-600 text-white py-3 rounded font-bold shadow";
+                    btn.innerText = o.txt;
+                    btn.onclick = o.fn;
+                    optDiv.appendChild(btn);
+                });
+            }
+        }
+
+        function showLock(item) {
+            showDialog(item.name, item.hint, null, item, [{txt:"解鎖", fn:()=>{
+                const div = document.getElementById('m-opts');
+                div.innerHTML = `
+                    <input id="code-in" class="w-full text-3xl text-center p-2 mb-4 border rounded text-black tracking-widest" readonly placeholder="____">
+                    <div class="grid grid-cols-3 gap-2">
+                        ${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="typeCode(${n})" class="num-btn">${n}</button>`).join('')}
+                        <button onclick="typeCode('C')" class="num-btn bg-red-200 text-red-800">C</button>
+                        <button onclick="typeCode(0)" class="num-btn">0</button>
+                        <button onclick="submitCode('${item.id}','${item.code}','${item.unlock}')" class="num-btn bg-green-600 text-white">OK</button>
+                    </div>
+                `;
+            }}]);
+        }
+
+        window.typeCode = function(n) {
+            const el = document.getElementById('code-in');
+            if(n==='C') el.value = '';
+            else if(el.value.length < 4) el.value += n;
+        };
+
+        window.submitCode = function(id, code, unlockId) {
+            const val = document.getElementById('code-in').value;
+            if (val === code) {
+                const item = LEVELS[gameState.level].items.find(i => i.id === id);
+                unlockItem(item.id);
+                closeModal();
+                setTimeout(() => {
+                    unlockItem(unlockId); 
+                    showDialog("解鎖成功", `保險箱打開了！發現了重要文件！`, null, item);
+                }, 300);
+            } else {
+                alert("密碼錯誤");
+                document.getElementById('code-in').value = '';
+            }
+        };
+
+        function showQuiz(item) {
+            showDialog("抉擇", item.quiz.q, null, item, [
+                {txt: item.quiz.opts[0], fn:()=>checkAns(0, item.quiz.ans)},
+                {txt: item.quiz.opts[1], fn:()=>checkAns(1, item.quiz.ans)}
+            ]);
+        }
+
+        function checkAns(i, ans) {
+            if (i === ans) { closeModal(); alert("正確！"); nextLevel(); }
+            else alert("錯誤，請回想線索。");
+        }
+
+        function closeModal() { document.getElementById('modal').classList.remove('show'); isPaused = false; }
+
+        function nextLevel() {
+            if (gameState.level < LEVELS.length - 1) {
+                gameState.level++;
+                gameState.inventory = [];
+                gameState.unlocked = [];
+                initLevel();
+            } else {
+                document.getElementById('ending-screen').style.display = 'flex';
+                isPaused = true;
+            }
+        }
+
+        function startGame() { 
+            document.getElementById('intro-screen').classList.remove('show'); 
+            document.getElementById('ui-layer').style.display = 'block'; 
+            document.getElementById('viewport').style.opacity = 1;
+            isPaused = false; gameLoop(); 
+        }
+        function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.style.opacity = 1; setTimeout(()=>t.style.opacity=0, 2000); }
+        function saveNote(t, c) { if(!gameState.notes.some(n=>n.t===t)) { gameState.notes.push({t,c}); document.getElementById('nb-content').innerHTML+=`<div class="border-b pb-2 border-stone-300"><b class="text-amber-800">【${t}】</b><br>${c}</div>`; document.getElementById('note-dot').classList.remove('hidden'); }}
+        function toggleNotebook() { const nb = document.getElementById('notebook'); nb.classList.toggle('open'); document.getElementById('note-dot').classList.add('hidden'); isPaused = nb.classList.contains('open'); }
+
+        // Input
+        const setKey = (k, v) => { if(k==='ArrowUp'||k==='w') keys.u=v; if(k==='ArrowDown'||k==='s') keys.d=v; if(k==='ArrowLeft'||k==='a') keys.l=v; if(k==='ArrowRight'||k==='d') keys.r=v; };
+        window.addEventListener('keydown', e => { setKey(e.key, true); if(e.key===' '||e.key==='Enter') triggerInteract(); });
+        window.addEventListener('keyup', e => setKey(e.key, false));
+        
+        const bindTouch = (cls, k) => { const el=document.querySelector(cls); el.addEventListener('pointerdown', e=>{e.preventDefault(); keys[k]=true;}); el.addEventListener('pointerup', e=>{e.preventDefault(); keys[k]=false;}); el.addEventListener('pointerleave', e=>{e.preventDefault(); keys[k]=false;}); };
+        bindTouch('.btn-u','u'); bindTouch('.btn-d','d'); bindTouch('.btn-l','l'); bindTouch('.btn-r','r');
+
+        window.onload = () => { 
+            lucide.createIcons(); 
+            player.el = document.getElementById('player');
+            initLevel(); 
+        };
+    </script>
+</body>
+
+</html>
